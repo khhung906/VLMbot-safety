@@ -1,3 +1,5 @@
+# @package _global_
+
 # Evaluation
 
 defaults:
@@ -22,9 +24,9 @@ val_on_heldout: True
 
 disp: False
 shared_memory: False
-eval_task: packing-boxes-pairs-seen-colors # task to evaluate the model on
-model_task: ${eval_task} # task the model was trained on (e.g. multi-language-conditioned or packing-boxes-pairs-seen-colors)
-type: single # 'single' or 'multi'
+eval_task: put-block-in-bowl-adversarial # packing-boxes-pairs-seen-colors # task to evaluate the model on
+model_task: multi-language-conditioned # ${eval_task} # task the model was trained on (e.g. multi-language-conditioned or packing-boxes-pairs-seen-colors)
+type: multi #single # 'single' or 'multi'
 
 # paths
 model_dir: ${root_dir}

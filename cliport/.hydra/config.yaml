@@ -7,13 +7,13 @@ gpu:
 - 0
 save_results: true
 update_results: true
-checkpoint_type: val_missing
+checkpoint_type: val
 val_on_heldout: true
 disp: false
 shared_memory: false
-eval_task: stack-block-pyramid-seq-unseen-colors
+eval_task: multi-attr-put-block-in-bowl-unseen-colors
 model_task: multi-language-conditioned
-type: single
+type: multi
 model_dir: ${root_dir}
 exp_folder: cliport_quickstart
 data_dir: ${root_dir}/data

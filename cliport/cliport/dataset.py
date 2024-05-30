@@ -343,6 +343,7 @@ class RavensMultiTaskDataset(RavensDataset):
                 'packing-unseen-google-objects-group',
                 'put-block-in-bowl-seen-colors',
                 'put-block-in-bowl-unseen-colors',
+                'put-block-in-bowl-adversarial',
                 'stack-block-pyramid-seq-seen-colors',
                 'stack-block-pyramid-seq-unseen-colors',
                 'separating-piles-seen-colors',
@@ -439,6 +440,7 @@ class RavensMultiTaskDataset(RavensDataset):
                 'packing-unseen-google-objects-group',
                 'put-block-in-bowl-seen-colors',
                 'put-block-in-bowl-unseen-colors',
+                'put-block-in-bowl-adversarial',
                 'stack-block-pyramid-seq-seen-colors',
                 'stack-block-pyramid-seq-unseen-colors',
                 'separating-piles-seen-colors',
@@ -595,7 +597,9 @@ class RavensMultiTaskDataset(RavensDataset):
                 'put-block-in-bowl-unseen-colors',
             ],
             'test': [
+                'put-block-in-bowl-seen-colors',
                 'put-block-in-bowl-unseen-colors',
+                'put-block-in-bowl-adversarial'
             ],
             'attr_train_task': 'put-block-in-bowl-seen-colors',
         },
@@ -672,6 +676,7 @@ class RavensMultiTaskDataset(RavensDataset):
         """A multi-task dataset."""
         self.root_path = path
         self.mode = mode
+        print(group, mode)
         self.tasks = self.MULTI_TASKS[group][mode]
         self.attr_train_task = self.MULTI_TASKS[group]['attr_train_task'] if 'attr_train_task' in self.MULTI_TASKS[group] else None
 

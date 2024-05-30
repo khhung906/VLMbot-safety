@@ -1,12 +1,12 @@
 - model_task=multi-language-conditioned
-- eval_task=stack-block-pyramid-seq-unseen-colors
+- eval_task=multi-attr-put-block-in-bowl-unseen-colors
 - agent=cliport
 - mode=test
 - n_demos=3
 - train_demos=1000
 - save_results=True
 - exp_folder=cliport_quickstart
-- checkpoint_type=val_missing
+- checkpoint_type=val
 - update_results=True
 - disp=False
 - record.save_video=True
