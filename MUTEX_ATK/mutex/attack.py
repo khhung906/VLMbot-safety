@@ -22,6 +22,7 @@ from mutex.utils import control_seed, safe_device, torch_load_model, \
                         make_dir, confidence_interval
 from mutex.embed_utils import get_visual_specifications_all, \
                         get_task_embs, get_audio_specification
+import argparse
 
 class EvalLogger:
     def __init__(self, log_keys: list):
@@ -130,7 +131,7 @@ def bm_set_task_embs(algo, benchmark, eval_spec_modalities, task_range, device):
     benchmark.set_task_embs(new_task_embs)
     return new_task_embs
 
-@hydra.main(config_path="../configs/eval", config_name="eval_only", version_base=None)
+@hydra.main(config_path="../configs/eval", config_name="attack", version_base=None)
 def main(eval_cfg):
     with open(os.path.join(eval_cfg.experiment_dir, "config.json"), "r") as f:
         cfg = json.load(f)
@@ -147,7 +148,7 @@ def main(eval_cfg):
     # prepare multitask learning. Overriding from eval_cfg because train and test could be in different machines
     cfg.num_gpus = 1
     cfg.eval.use_mp = eval_cfg.use_mp
-    cfg.recalculate_ts_embs = False
+    cfg.recalculate_ts_embs = True
     cfg.device = eval_cfg.device
     cfg.folder = to_absolute_path(eval_cfg.folder)
     cfg.bddl_folder = to_absolute_path(eval_cfg.bddl_folder)
@@ -159,6 +160,9 @@ def main(eval_cfg):
     train_benchmark_name = cfg.benchmark_name
     cfg.benchmark_name = eval_cfg.benchmark_name if eval_cfg.benchmark_name is not None else cfg.benchmark_name
     cfg.pretrain_model_path = [os.path.join(cfg.experiment_dir, 'models', eval_cfg.model_name)]
+    cfg.base_task_id = eval_cfg.base_task_id
+    cfg.target_task_id = eval_cfg.target_task_id
+    cfg.attack_method = eval_cfg.attack_method
     if ('cmm_' in eval_cfg.model_name) or ('mutex' in eval_cfg.model_name):
         cfg.policy.add_mim = False
         cfg.policy.add_mgm = False
@@ -231,7 +235,12 @@ def main(eval_cfg):
         task_name = benchmark.get_task(i).name
         task_description = benchmark.get_task(i).language
         instructions = benchmark.get_task(i).instructions
-        goal_language = benchmark.get_task((i+1)%10).goal_language
+        goal_language = benchmark.get_task(i).goal_language
+
+        if i == cfg.target_task_id:
+            cfg.target_lang_assets = { "ins": instructions, "gl": goal_language }
+        if i == cfg.base_task_id:
+            cfg.base_task_name = task_name
 
         task_list.append(task_name)
         task_demo_path_list.append(benchmark.get_task_demonstration(i))
@@ -245,6 +254,7 @@ def main(eval_cfg):
     task_visual_specifications = [None]*n_manip_tasks
     if ('img' in task_spec_modalities) or ('vid' in task_spec_modalities):
         task_visual_specifications = get_visual_specifications_all(
+                                algo=safe_device(eval(cfg.lifelong.algo)(n_manip_tasks // cfg.data.task_group_size, cfg, logger=None), cfg.device),
                                 cfg=cfg,
                                 task_list=task_list,
                                 benchmark_name=benchmark.name,
@@ -271,7 +281,7 @@ def main(eval_cfg):
     gsz = cfg.data.task_group_size
     n_tasks = n_manip_tasks // gsz # number of multitask learning tasks
     cfg.shape_meta = shape_meta
-    task_range = range(n_tasks) if eval_cfg.task_id == -1 else [eval_cfg.task_id]
+    task_range = [cfg.target_task_id] # set eval as target task # range(n_tasks) if eval_cfg.task_id == -1 else [eval_cfg.task_id]
     print("\n=================== Lifelong Benchmark Information  ===================")
     print(f" Name: {benchmark.name}")
     print(f" # Tasks: {n_manip_tasks // gsz}")
@@ -342,4 +352,5 @@ def main(eval_cfg):
     del algo
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
     main()

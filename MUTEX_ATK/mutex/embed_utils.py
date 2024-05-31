@@ -14,6 +14,7 @@ from transformers import AutoModel, pipeline, AutoTokenizer, CLIPTextModelWithPr
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from mutex.models.task_specs import CLIPVisionSliced
+from mutex.attack_utils import generate_perturbed_images
 
 def get_audio_specification(benchmark_name, task_list, cfg, mode='train'):
     train_max_ts = int(0.8*cfg.n_ts_per_task)
@@ -102,7 +103,7 @@ def get_audio_specification(benchmark_name, task_list, cfg, mode='train'):
                 pickle.dump(ag_task_spec_list, fi)
     return ag_task_spec_list, ai_task_spec_list
 
-def get_visual_specifications_all(benchmark_name, task_list, task_demo_path_list, cfg, mode='train'):
+def get_visual_specifications_all(algo, benchmark_name, task_list, task_demo_path_list, cfg, mode='train'):
     train_max_ts = int(0.8*cfg.n_ts_per_task)
     task_id_range = range(train_max_ts) if mode == 'train' else range(train_max_ts, cfg.n_ts_per_task)
 
@@ -136,6 +137,14 @@ def get_visual_specifications_all(benchmark_name, task_list, task_demo_path_list
                 for filename in sorted(glob.glob(f'{visual_specs_path}/*.png')):
                     im=Image.open(filename)
                     image_list.append(im)
+                # TODO: Implememt Attack Here (Only on Image)
+                print(task_name, cfg.base_task_name)
+                if task_name == cfg.base_task_name:
+                    if cfg.attack_method == "vanilla":
+                        pass
+                    elif cfg.attack_method == "gl2img":
+                        print("perturb")
+                        generate_perturbed_images(cfg, algo, image_list[-1], cfg.target_lang_assets["gl"], "gl", 12/255, 20)
                 if cfg.visual_embedding_format == "clip":
                     visual_task_spec = visual_preprocessor(image_list, return_tensors='pt', padding=True)['pixel_values']
                 elif cfg.visual_embedding_format == "r3m":
@@ -169,8 +178,11 @@ def get_visual_specifications_all(benchmark_name, task_list, task_demo_path_list
                     'img_task_spec_mask': img_task_spec_mask_final
             }
             # save the dictionary to file using pickle
-            with open(saved_emb_path, 'wb') as fi:
-                pickle.dump(return_dict, fi)
+            try:
+                with open(saved_emb_path, 'wb') as fi:
+                    pickle.dump(return_dict, fi)
+            except:
+                print("Fail to save emb")
     else:
         print(f"Reading embeddings from path {saved_emb_path}")
         # load the saved dictionary using pickle
