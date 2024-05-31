@@ -205,9 +205,9 @@ def evaluate_multitask_training_success(cfg, algo, benchmark, task_ids, result_s
     algo.eval()
     successes = []
     for i in tqdm(task_ids):
-        task_i = benchmark.get_task(i)
-        task_emb = benchmark.get_task_emb(i) # [num_eval_ts, T, E]
-        task_str = f"k{task_ids[-1]}_p{i}"
+        task_i = benchmark.get_task(cfg.target_task_id) # i
+        task_emb = benchmark.get_task_emb(cfg.base_task_id) # [num_eval_ts, T, E] # i
+        task_str = f"k{task_ids[-1]}_p{cfg.target_task_id}"
         curr_summary = {}
         for eval_traj_i in range(cfg.eval.n_eval):
             curr_summary[eval_traj_i] = []
@@ -216,7 +216,7 @@ def evaluate_multitask_training_success(cfg, algo, benchmark, task_ids, result_s
                                                  algo=algo,
                                                  task=task_i,
                                                  task_emb=task_emb,
-                                                 task_id=i,
+                                                 task_id=cfg.target_task_id, # i
                                                  task_str=task_str,
                                                  sim_states=curr_summary)
         successes.append(success_rate)
