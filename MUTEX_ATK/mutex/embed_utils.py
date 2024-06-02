@@ -14,7 +14,7 @@ from transformers import AutoModel, pipeline, AutoTokenizer, CLIPTextModelWithPr
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from mutex.models.task_specs import CLIPVisionSliced
-from mutex.attack_utils import generate_perturbed_images, generate_misaligned_sentence
+from mutex.attack_utils import generate_perturbed_images, generate_misaligned_sentence, generate_perturbed_images_from_target_gl_clip
 
 def get_audio_specification(benchmark_name, task_list, cfg, mode='train'):
     train_max_ts = int(0.8*cfg.n_ts_per_task)
@@ -144,7 +144,8 @@ def get_visual_specifications_all(algo, benchmark_name, task_list, task_demo_pat
                         pass
                     elif cfg.attack_method == "gl2img":
                         # print("perturb")
-                        generate_perturbed_images(cfg, algo, image_list[-1], cfg.target_lang_assets["gl"], "gl", 12/255, 20)
+                        # generate_perturbed_images(cfg, algo, image_list[-1], cfg.target_lang_assets["gl"], "gl", 12/255, 20)
+                        image_list[-1] = generate_perturbed_images_from_target_gl_clip(cfg, image_list[-1])
                 if cfg.visual_embedding_format == "clip":
                     visual_task_spec = visual_preprocessor(image_list, return_tensors='pt', padding=True)['pixel_values']
                 elif cfg.visual_embedding_format == "r3m":

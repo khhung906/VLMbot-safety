@@ -245,9 +245,9 @@ def main(eval_cfg):
         # print(task_name, ':', goal_language)
 
         if i == cfg.target_task_id:
-            cfg.target_lang_assets = { "ins": instructions, "gl": goal_language }
+            cfg.target_lang_assets = { "des": task_description, "ins": instructions, "gl": goal_language }
         if i == cfg.base_task_id:
-            cfg.base_lang_assets = { "ins": instructions, "gl": goal_language }
+            cfg.base_lang_assets = { "des": task_description, "ins": instructions, "gl": goal_language }
             cfg.base_task_name = task_name
         
         task_list.append(task_name)

@@ -1,8 +1,9 @@
 import numpy as np
 import torch
 import torchvision
+from torchvision import transforms
 from mutex.models.task_specs import CLIPVisionSliced
-from transformers import CLIPFeatureExtractor, AutoTokenizer, CLIPTextModelWithProjection
+from transformers import CLIPFeatureExtractor, AutoTokenizer, CLIPTextModelWithProjection, CLIPProcessor, CLIPModel
 from hydra.utils import to_absolute_path
 from tqdm import tqdm
 from copy import deepcopy
@@ -11,19 +12,68 @@ import os
 import mutex
 from mutex.rephrased_gls import rephrase_sentences
 
-def generate_perturbed_images(cfg, algo, image, target, target_type, epsilon, iters):
-  target_embs = None
-  # print('attack', target_type)
-  if target_type == 'img':
-     target_embs = project_embs(algo, encode_image(target), ['img'], 'cuda')
-  else:
-     # print(target)
-     target_embs, _ = get_lang_task_embs(cfg, target, target_type, 'eval')
-     # print(target_embs.shape, target_embs)
-     target_embs = project_embs(algo, target_embs[0],  [target_type], 'cuda')
-     # print(target_embs.shape, target_embs)
-  perturbed = ifgsm_attack(algo, image, target_embs, epsilon, iters)
-  return perturbed
+def generate_perturbed_images_from_target_gl_clip(cfg, image, epsilon=12 / 255.0, iters=32):
+  # Load the CLIP model and processor
+  model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+  processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+  inverse_normalize = transforms.Normalize(mean=[-0.48145466 / 0.26862954, -0.4578275 / 0.26130258, -0.40821073 / 0.27577711], std=[1.0 / 0.26862954, 1.0 / 0.26130258, 1.0 / 0.27577711])
+
+  image_encoder = model.vision_model
+  text_encoder = model.text_model
+  image_projection = model.visual_projection
+  text_projection = model.text_projection
+
+  image_encoder.eval()
+
+  # load image and text
+  # original_image = transforms.ToTensor()(image).unsqueeze(0).requires_grad_(True)
+
+  ori_text_input = clip_preprocess('text', cfg.base_lang_assets["des"], processor)
+  tgt_text_input = clip_preprocess('text', cfg.target_lang_assets["des"], processor)
+  img_input = clip_preprocess('img', image, processor)
+
+  ori_text_emb = clip_encode('text', ori_text_input, text_encoder, text_projection) 
+  ori_text_emb = ori_text_emb / ori_text_emb.norm(dim=1, keepdim=True)
+  tgt_text_emb = clip_encode('text', tgt_text_input, text_encoder, text_projection)
+  tgt_text_emb = tgt_text_emb / tgt_text_emb.norm(dim=1, keepdim=True)
+
+
+  # for normalized image
+  scaling_tensor = torch.tensor((0.26862954, 0.26130258, 0.27577711))
+  scaling_tensor = scaling_tensor.reshape((3, 1, 1)).unsqueeze(0)
+      
+  alpha = 1 / 255.0 / scaling_tensor
+  epsilon = epsilon / scaling_tensor
+
+  # perturbed_image = fgsm_attack(img_input, epsilon, image_grad)
+  delta = torch.zeros_like(img_input, requires_grad=True)
+  for j in range(iters):
+      adv_image = img_input + delta   # image is normalized to (0.0, 1.0)
+      adv_emb = clip_encode('img', adv_image, image_encoder, image_projection)
+      
+      adv_emb = adv_emb / adv_emb.norm(dim=1, keepdim=True)
+      
+      # print(calc_sim(adv_emb, ori_text_emb), calc_sim(adv_emb, tgt_text_emb))
+      loss = calc_sim(adv_emb, tgt_text_emb) # / (calc_sim(adv_emb, ori_text_emb) + calc_sim(adv_emb, tgt_text_emb))
+      
+      loss.backward(retain_graph=True)
+      
+      grad = delta.grad.detach()
+
+      delta_data = torch.clamp(delta + alpha * torch.sign(grad), min=-epsilon, max=epsilon)
+      delta.data = delta_data
+      delta.grad.zero_()
+
+      tgt_sim = calc_sim(adv_emb, tgt_text_emb)
+      ori_sim = calc_sim(adv_emb, ori_text_emb) 
+
+      print(f"step:{j:3d}, loss={loss.item():.5f}, delta(tgt-ori)={(tgt_sim-ori_sim):.5f}, sim (ori)={ori_sim:.5f}, sim (tgt)={tgt_sim:.5f}, max delta={torch.max(torch.abs(delta_data)).item():.3f}, mean delta={torch.mean(torch.abs(delta_data)).item():.3f}")
+
+  # save the perturbed image
+  adv_image = img_input + delta
+  adv_image = torch.clamp(inverse_normalize(adv_image), 0.0, 1.0)
+  # torchvision.utils.save_image(adv_image, 'perturbed.png')
+  return transform_tensor_2_pil_image(adv_image)
 
 def generate_misaligned_sentence(cfg, algo, target_type):
   target_emb, _ = get_lang_task_embs(cfg, cfg.target_lang_assets[target_type], target_type, 'eval')
@@ -43,7 +93,49 @@ def generate_misaligned_sentence(cfg, algo, target_type):
   effective.sort()
   effective.reverse()
   return [rephrase_sentences[cfg.base_task_name][i]  for _, i in effective[:11]]
-  
+
+def generate_perturbed_images(cfg, algo, image, target, target_type, epsilon, iters):
+  target_embs = None
+  # print('attack', target_type)
+  if target_type == 'img':
+     target_embs = project_embs(algo, encode_image(target), ['img'], 'cuda')
+  else:
+     # print(target)
+     target_embs, _ = get_lang_task_embs(cfg, target, target_type, 'eval')
+     # print(target_embs.shape, target_embs)
+     target_embs = project_embs(algo, target_embs[0],  [target_type], 'cuda')
+     # print(target_embs.shape, target_embs)
+  perturbed = ifgsm_attack(algo, image, target_embs, epsilon, iters)
+  return perturbed
+
+def clip_preprocess(modality, input, processor):
+  if modality == 'text': # preprocess text
+    text_inputs = processor(text=[input], return_tensors="pt", padding=True)
+    return text_inputs
+  else: # preprocess image
+    inputs = processor(text=[""], images=input, return_tensors="pt", padding=True)
+    image_input = inputs['pixel_values'].clone().detach().requires_grad_(True)
+    return image_input
+def clip_encode(modality, inputs, encoder, projector):
+  if modality == 'text': # encode text
+    text_features = encoder(**inputs).last_hidden_state
+    text_features = projector(text_features.mean(dim=1))
+    return text_features
+  else: # encode image
+    image_features = encoder(pixel_values=inputs).pooler_output
+    image_features = projector(image_features)
+    return image_features
+def calc_sim(emb1, emb2, metric='cos'):
+  if metric == 'cos':
+    embedding_sim = torch.mean(torch.sum(emb1 * emb2, dim=1))  # cos. sim
+  elif metric == 'l2':
+    embedding_sim = torch.mean(torch.norm(emb1 - emb2, p=2, dim=1))
+  return embedding_sim
+def transform_tensor_2_pil_image(img_tensor):
+  img_arr = img_tensor[0].permute(1, 2, 0).detach().numpy()
+  img_arr = np.round(img_arr * 255).astype(np.uint8)
+  return Image.fromarray(img_arr)
+
 def encode_image(image):
   visual_preprocessor = CLIPFeatureExtractor.from_pretrained('openai/clip-vit-large-patch14')
   visual_emb_model = CLIPVisionSliced.from_pretrained('openai/clip-vit-large-patch14', cache_dir=to_absolute_path("./clip"))
