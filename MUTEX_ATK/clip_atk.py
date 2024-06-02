@@ -78,12 +78,12 @@ for j in range(32):
     adv_emb = adv_emb / adv_emb.norm(dim=1, keepdim=True)
     
     # print(calc_sim(adv_emb, ori_text_emb), calc_sim(adv_emb, tgt_text_emb))
-    loss = calc_sim(adv_emb, tgt_text_emb) / (calc_sim(adv_emb, ori_text_emb) + calc_sim(adv_emb, tgt_text_emb))
+    loss = calc_sim(adv_emb, tgt_text_emb) # / (calc_sim(adv_emb, ori_text_emb) + calc_sim(adv_emb, tgt_text_emb))
     
     loss.backward(retain_graph=True)
     
     grad = delta.grad.detach()
-    
+
     delta_data = torch.clamp(delta + alpha * torch.sign(grad), min=-epsilon, max=epsilon)
     delta.data = delta_data
     delta.grad.zero_()
