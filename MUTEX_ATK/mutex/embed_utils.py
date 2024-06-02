@@ -14,7 +14,7 @@ from transformers import AutoModel, pipeline, AutoTokenizer, CLIPTextModelWithPr
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from mutex.models.task_specs import CLIPVisionSliced
-from mutex.attack_utils import generate_perturbed_images
+from mutex.attack_utils import generate_perturbed_images, generate_misaligned_sentence
 
 def get_audio_specification(benchmark_name, task_list, cfg, mode='train'):
     train_max_ts = int(0.8*cfg.n_ts_per_task)
@@ -138,12 +138,12 @@ def get_visual_specifications_all(algo, benchmark_name, task_list, task_demo_pat
                     im=Image.open(filename)
                     image_list.append(im)
                 # TODO: Implememt Attack Here (Only on Image)
-                print(task_name, cfg.base_task_name)
+                # print(task_name, cfg.base_task_name)
                 if task_name == cfg.base_task_name:
                     if cfg.attack_method == "vanilla":
                         pass
                     elif cfg.attack_method == "gl2img":
-                        print("perturb")
+                        # print("perturb")
                         generate_perturbed_images(cfg, algo, image_list[-1], cfg.target_lang_assets["gl"], "gl", 12/255, 20)
                 if cfg.visual_embedding_format == "clip":
                     visual_task_spec = visual_preprocessor(image_list, return_tensors='pt', padding=True)['pixel_values']
@@ -189,14 +189,18 @@ def get_visual_specifications_all(algo, benchmark_name, task_list, task_demo_pat
         with open(saved_emb_path, 'rb') as fi:
             return_dict = pickle.load(fi)
     task_visual_specifications = []
-    print(return_dict.keys())
+    # print(return_dict.keys())
     for task_name in task_list:
         for k,v in return_dict[task_name].items():
             return_dict[task_name][k] = [v[i] for i in task_id_range]
         task_visual_specifications.append(return_dict[task_name])
     return task_visual_specifications
 
-def get_task_embs(cfg, descriptions, spec_type, mode='train'):
+def get_task_embs(cfg, algo, descriptions, spec_type, mode='train'):
+    if cfg.attack_method == 'gl2gl':
+        ms = generate_misaligned_sentence(cfg, algo, spec_type)
+        descriptions[cfg.base_task_id] = ms
+        cfg.selected_rephrases = ms
     # read stop words from file in mutex.__path__[0], english_stopwords.txt
     stop_words = []
     with open(os.path.join(mutex.__path__[0], 'english_stopwords.txt'), 'r') as fi:

@@ -11,7 +11,7 @@ import cv2
 from easydict import EasyDict
 from hydra.utils import to_absolute_path
 from omegaconf import OmegaConf
-
+import datetime
 from libero.libero import benchmark as bm
 from libero.libero.envs import OffScreenRenderEnv
 from mutex.utils import sample_frames
@@ -50,6 +50,7 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
 
     env = OffScreenRenderEnv(**env_args)
     env.seed(cfg.seed)
+    sub_dir_name = datetime.datetime.now().strftime('%m-%d-%H-%M-%S') + f"data_{cfg.benchmark_name}_attack_{cfg.attack_method}_base_{cfg.base_task_id}_target_{cfg.target_task_id}"
     for traj_key in result_summary[task_ind]["sim_states"].keys():
         print(f"Task index {task_ind}, eval_traj {traj_key}, length {len(result_summary[task_ind]['sim_states'][traj_key])}")
 
@@ -60,8 +61,8 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
             img = obs["agentview_image"][::-1,:,:]
             imgs.append(img)
 
-        make_dir(os.path.join(eval_cfg.experiment_dir, "videos"))
-        video_path = os.path.join(eval_cfg.experiment_dir, "videos", f"summary_taskind{task_ind}_no{traj_key}.avi")
+        make_dir(os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name))
+        video_path = os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name, f"summary_taskind{task_ind}_no{traj_key}.avi")
         print(f"---- Saving video: {len(imgs)}\n", video_path)
         out = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'MJPG'), 30, (record_h, record_w))
         # Write frames to the VideoWriter object
@@ -69,6 +70,10 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
             out.write(frame)
         # Release the VideoWriter object
         out.release()
+        with open(os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name, "senetnces.txt"), 'w') as f:
+            for s in cfg.selected_rephrases:
+                print(s, file=f)
+            f.close()
 
     env.close()
     import gc; gc.collect()
@@ -237,11 +242,14 @@ def main(eval_cfg):
         instructions = benchmark.get_task(i).instructions
         goal_language = benchmark.get_task(i).goal_language
 
+        # print(task_name, ':', goal_language)
+
         if i == cfg.target_task_id:
             cfg.target_lang_assets = { "ins": instructions, "gl": goal_language }
         if i == cfg.base_task_id:
+            cfg.base_lang_assets = { "ins": instructions, "gl": goal_language }
             cfg.base_task_name = task_name
-
+        
         task_list.append(task_name)
         task_demo_path_list.append(benchmark.get_task_demonstration(i))
         descriptions.append(task_description)
@@ -252,9 +260,10 @@ def main(eval_cfg):
     gl_embs, gl_tokens = None, None
     ag_task_specs, ai_task_specs = None, None
     task_visual_specifications = [None]*n_manip_tasks
+    policy_algo = safe_device(eval(cfg.lifelong.algo)(n_manip_tasks // cfg.data.task_group_size, cfg, logger=None), cfg.device)
     if ('img' in task_spec_modalities) or ('vid' in task_spec_modalities):
         task_visual_specifications = get_visual_specifications_all(
-                                algo=safe_device(eval(cfg.lifelong.algo)(n_manip_tasks // cfg.data.task_group_size, cfg, logger=None), cfg.device),
+                                algo=policy_algo,
                                 cfg=cfg,
                                 task_list=task_list,
                                 benchmark_name=benchmark.name,
@@ -267,9 +276,9 @@ def main(eval_cfg):
                                 cfg=cfg,
                                 mode=eval_cfg.ts_mode)
     if 'inst' in task_spec_modalities:
-        inst_embs, inst_tokens = get_task_embs(cfg, dataset_inst, spec_type='inst', mode=eval_cfg.ts_mode)
+        inst_embs, inst_tokens = get_task_embs(cfg, policy_algo, dataset_inst, spec_type='inst', mode=eval_cfg.ts_mode)
     if 'gl' in task_spec_modalities:
-        gl_embs, gl_tokens = get_task_embs(cfg, dataset_gl, spec_type='gl', mode=eval_cfg.ts_mode)
+        gl_embs, gl_tokens = get_task_embs(cfg, policy_algo, dataset_gl, spec_type='gl', mode=eval_cfg.ts_mode)
 
     benchmark.set_gl_embs(gl_embs)
     benchmark.set_inst_embs(inst_embs)
@@ -290,7 +299,7 @@ def main(eval_cfg):
         for j in range(gsz):
                 print(f"        {benchmark.get_task(i*gsz+j).language}")
     print("=======================================================================\n")
-    all_tasks = list(range(benchmark.n_tasks)) if eval_cfg.task_id == -1 else [eval_cfg.task_id]
+    all_tasks = [cfg.target_task_id]# list(range(benchmark.n_tasks)) if eval_cfg.task_id == -1 else [eval_cfg.task_id]
     keys_to_log = ["epoch", "seed", "n_eval", "mean_success", "ci"]
     for task_id in all_tasks:
         task_i = benchmark.get_task(task_id).name

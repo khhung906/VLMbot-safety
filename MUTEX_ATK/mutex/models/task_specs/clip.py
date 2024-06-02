@@ -50,6 +50,15 @@ class CLIPVisionSliced(CLIPVisionModelWithProjection):
         set_requires_grad(self.pre_compute_vision_model_encoder, False)
         set_requires_grad(self.vision_model.embeddings, False)
         set_requires_grad(self.vision_model.pre_layrnorm, False)
+    
+    def create_precomputable_models_grad(self, layer_ind=10):
+        #assert layer_ind <= 12, "Maximum slicing can be done with layer_ind=12 where only the projection layer is computed."
+        self.pre_compute_vision_model_encoder = copy.deepcopy(self.vision_model.encoder) ## redundancy? but only done once
+        self.post_compute_vision_model_encoder = copy.deepcopy(self.vision_model.encoder)
+        self.pre_compute_vision_model_encoder.layers = self.pre_compute_vision_model_encoder.layers[:layer_ind]
+        self.post_compute_vision_model_encoder.layers = self.post_compute_vision_model_encoder.layers[layer_ind:]
+        del self.vision_model.encoder
+        self.train(False)
 
     def train(
         self,
@@ -97,6 +106,36 @@ class CLIPVisionSliced(CLIPVisionModelWithProjection):
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
             )
+
+        return encoder_outputs
+    
+    def pre_compute_feats_grad(
+            self,
+            pixel_values: Optional[torch.FloatTensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+        ) -> Union[Tuple, CLIPVisionModelOutput]:
+
+        
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        #return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if pixel_values is None:
+            raise ValueError("You have to specify pixel_values")
+
+        hidden_states = self.vision_model.embeddings(pixel_values)
+        hidden_states = self.vision_model.pre_layrnorm(hidden_states)
+
+        encoder_outputs = self.pre_compute_vision_model_encoder( ## Replace this
+            inputs_embeds=hidden_states,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
 
         return encoder_outputs
 

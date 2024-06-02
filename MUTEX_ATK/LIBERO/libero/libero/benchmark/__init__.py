@@ -82,6 +82,7 @@ with open(filepath, 'r') as data:
                     raise ValueError(f"Unknown key {key}")
 
 libero_suites = [
+    "libero_attack",
     "libero_spatial",
     "libero_object",
     "libero_goal",
@@ -144,7 +145,7 @@ class Benchmark(abc.ABC):
     def _make_benchmark(self):
         tasks = list(task_maps[self.name].values())
         if self.name == "libero_90" or self.name == "libero_100" or\
-                self.name == "rw_all" or self.name == "debug":
+                self.name == "rw_all" or self.name == "debug" or self.name == "libero_attack":
             self.tasks = tasks
         else:
             print(f"[info] using task orders {task_orders[self.task_order_index]}")
@@ -323,4 +324,11 @@ class LIBERO_100(Benchmark):
     def __init__(self, task_order_index=0):
         super().__init__(task_order_index=task_order_index)
         self.name = "libero_100"
+        self._make_benchmark()
+
+@register_benchmark
+class LIBERO_ATTACK(Benchmark):
+    def __init__(self, task_order_index=0):
+        super().__init__(task_order_index=task_order_index)
+        self.name = "libero_attack"
         self._make_benchmark()

@@ -9,32 +9,52 @@ from copy import deepcopy
 from PIL import Image
 import os
 import mutex
+from mutex.rephrased_gls import rephrase_sentences
 
 def generate_perturbed_images(cfg, algo, image, target, target_type, epsilon, iters):
-  target_emb = None
-  print('attack', target_type)
+  target_embs = None
+  # print('attack', target_type)
   if target_type == 'img':
      target_embs = project_embs(algo, encode_image(target), ['img'], 'cuda')
   else:
-     print(target)
+     # print(target)
      target_embs, _ = get_lang_task_embs(cfg, target, target_type, 'eval')
-     print(target_embs.shape, target_embs)
+     # print(target_embs.shape, target_embs)
      target_embs = project_embs(algo, target_embs[0],  [target_type], 'cuda')
-     print(target_embs.shape, target_embs)
+     # print(target_embs.shape, target_embs)
   perturbed = ifgsm_attack(algo, image, target_embs, epsilon, iters)
   return perturbed
+
+def generate_misaligned_sentence(cfg, algo, target_type):
+  target_emb, _ = get_lang_task_embs(cfg, cfg.target_lang_assets[target_type], target_type, 'eval')
+  # print(target_emb.shape)
+  target_proj = [project_embs(algo, target_emb[i],  [target_type], 'cuda') for i in range(target_emb.shape[0])]
+  origin_emb, _ = get_lang_task_embs(cfg, cfg.base_lang_assets[target_type], target_type, 'eval')
+  origin_proj = [project_embs(algo, origin_emb[i],  [target_type], 'cuda') for i in range(origin_emb.shape[0])]
+  effective = []
+  for i, s in enumerate(rephrase_sentences[cfg.base_task_name]):
+      setence_emb, _ = get_lang_task_embs(cfg, [s], target_type, 'eval')
+      proj = project_embs(algo, setence_emb[0],  [target_type], 'cuda')
+      target_dist = [torch.norm(proj - target_proj[i]).item() for i in range(len(target_proj))]
+      origin_dist = [torch.norm(proj - origin_proj[i]).item() for i in range(len(origin_proj))]
+      target_dist = sum(target_dist) / len(target_dist)
+      origin_dist = sum(origin_dist) / len(origin_dist)
+      effective.append((origin_dist - target_dist, i))
+  effective.sort()
+  effective.reverse()
+  return [rephrase_sentences[cfg.base_task_name][i]  for _, i in effective[:11]]
   
 def encode_image(image):
   visual_preprocessor = CLIPFeatureExtractor.from_pretrained('openai/clip-vit-large-patch14')
   visual_emb_model = CLIPVisionSliced.from_pretrained('openai/clip-vit-large-patch14', cache_dir=to_absolute_path("./clip"))
   visual_emb_model.eval()
-  visual_emb_model.create_precomputable_models(layer_ind=23)
+  visual_emb_model.create_precomputable_models_grad(layer_ind=23)
   visual_emb_model = visual_emb_model.to('cuda')
   visual_task_spec = visual_preprocessor([image], return_tensors='pt', padding=True)['pixel_values']
   visual_task_spec = visual_task_spec.to('cuda')
   input_batch = visual_task_spec
-  with torch.no_grad():
-      output_batch = visual_emb_model.pre_compute_feats(input_batch)[0] ## [bs, 50, 512] 0th index has hidden embed
+  # with torch.no_grad():
+  output_batch = visual_emb_model.pre_compute_feats_grad(input_batch)[0] ## [bs, 50, 512] 0th index has hidden embed
   img_task_emb = output_batch
   return img_task_emb
 
@@ -59,16 +79,19 @@ def ifgsm_attack(algo, image, target_emb, eps, iters):
     
 
 def fgsm_attack(algo, image, img_tensor, target_emb, eps):
-  img_adv = img_tensor.detach().clone() # initialize x_adv as original benign image x
+  img_adv = img_tensor # .clone() # initialize x_adv as original benign image x # .detach()
   img_adv.requires_grad_(True) # need to obtain gradient of x_adv, thus set required grad
+  # print(img_adv)
   emb = project_embs(algo, encode_image(img_adv), ['img'], 'cuda')
-  print(img_adv.is_leaf, torch.is_grad_enabled())
-  print(emb.shape, target_emb.shape)
+  # print(img_adv)
+  # print(img_adv.is_leaf, torch.is_grad_enabled())
+  # print(emb.shape, target_emb.shape)
   loss = torch.norm(emb - target_emb) # calculate loss
-  print(loss, img_adv, img_adv.grad)
-  img_adv.retain_grad()
+  # print(loss, img_adv, img_adv.grad)
+  # img_adv.retain_grad()
   loss.backward() # calculate gradient
   # fgsm: use gradient ascent on x_adv to maximize loss
+  # print(img_adv)
   grad = img_adv.grad.detach()
   img_adv = img_adv - eps * grad.sign()
   return img_adv, loss
@@ -93,7 +116,7 @@ def project_embs(algo, emb, eval_spec_modalities, device):
         ## adding time dimension
         data_dict['gl_emb'] = gl_emb.unsqueeze(dim=1).to(device)
 
-    print(data_dict)
+    # print(data_dict)
     emb, *temp = algo.policy.get_task_embs(data_dict, modalities=eval_spec_modalities)
     new_task_embs.append(emb)
 
@@ -109,7 +132,6 @@ def get_lang_task_embs(cfg, descriptions, spec_type, mode='train'):
             stop_words.append(line.strip())
 
     task_id_range = range(cfg.n_ts_per_task)
-    save_embeddings = True
     if mode == 'train' or mode == 'eval':
         train_max_ts = int(0.8*cfg.n_ts_per_task)
         task_id_range = range(train_max_ts) if mode == 'train' else range(train_max_ts, cfg.n_ts_per_task, 1)
