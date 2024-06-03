@@ -50,7 +50,7 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
 
     env = OffScreenRenderEnv(**env_args)
     env.seed(cfg.seed)
-    sub_dir_name = datetime.datetime.now().strftime('%m-%d-%H-%M-%S') + f"data_{cfg.benchmark_name}_attack_{cfg.attack_method}_base_{cfg.base_task_id}_target_{cfg.target_task_id}"
+    sub_dir_name = datetime.datetime.now().strftime('%m-%d-%H-%M-%S') + f"_data_{cfg.benchmark_name.lower()}_attack_{cfg.attack_method}_base_{cfg.base_task_id}_target_{cfg.target_task_id}"
     for traj_key in result_summary[task_ind]["sim_states"].keys():
         print(f"Task index {task_ind}, eval_traj {traj_key}, length {len(result_summary[task_ind]['sim_states'][traj_key])}")
 
