@@ -70,10 +70,11 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
             out.write(frame)
         # Release the VideoWriter object
         out.release()
-        with open(os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name, "senetnces.txt"), 'w') as f:
-            for s in cfg.selected_rephrases:
-                print(s, file=f)
-            f.close()
+        if cfg.attack_method == 'gl2gl':
+            with open(os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name, "senetnces.txt"), 'w') as f:
+                for s in cfg.selected_rephrases:
+                    print(s, file=f)
+                f.close()
 
     env.close()
     import gc; gc.collect()
