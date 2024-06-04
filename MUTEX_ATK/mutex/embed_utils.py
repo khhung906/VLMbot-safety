@@ -14,7 +14,7 @@ from transformers import AutoModel, pipeline, AutoTokenizer, CLIPTextModelWithPr
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from mutex.models.task_specs import CLIPVisionSliced
-from mutex.attack_utils import generate_perturbed_images, generate_misaligned_sentence, generate_perturbed_images_from_target_gl_clip
+from mutex.attack_utils import generate_perturbed_images_clip, generate_misaligned_sentence
 
 def get_audio_specification(benchmark_name, task_list, cfg, mode='train'):
     train_max_ts = int(0.8*cfg.n_ts_per_task)
@@ -137,15 +137,24 @@ def get_visual_specifications_all(algo, benchmark_name, task_list, task_demo_pat
                 for filename in sorted(glob.glob(f'{visual_specs_path}/*.png')):
                     im=Image.open(filename)
                     image_list.append(im)
+
                 # TODO: Implememt Attack Here (Only on Image)
-                # print(task_name, cfg.base_task_name)
                 if task_name == cfg.base_task_name:
                     if cfg.attack_method == "vanilla":
                         pass
                     elif cfg.attack_method == "gl2img":
                         # print("perturb")
                         # generate_perturbed_images(cfg, algo, image_list[-1], cfg.target_lang_assets["gl"], "gl", 12/255, 20)
-                        image_list[-1] = generate_perturbed_images_from_target_gl_clip(cfg, image_list[-1])
+                        image_list[-1] = generate_perturbed_images_clip(cfg, image_list[-1])
+                        cfg.perturbed_image = image_list[-1]
+                    elif cfg.attack_method == "img2img":
+                        target_vid_dir = os.path.join(cfg.folder, task_demo_path_list[cfg.target_task_id][:-5].split('/')[0], 'task_spec', task_demo_path_list[cfg.target_task_id][:-5].split('/')[1])
+                        target_visual_specs_path = os.path.join(target_vid_dir, f'vid_{task_spec_id:03d}')
+                        target_image = Image.open(sorted(glob.glob(f'{target_visual_specs_path}/*.png'))[-1])
+                        image_list[-1] = generate_perturbed_images_clip(cfg, image_list[-1], target_image)
+                        cfg.perturbed_image = image_list[-1]
+                        # print("change target image")
+
                 if cfg.visual_embedding_format == "clip":
                     visual_task_spec = visual_preprocessor(image_list, return_tensors='pt', padding=True)['pixel_values']
                 elif cfg.visual_embedding_format == "r3m":
@@ -153,6 +162,7 @@ def get_visual_specifications_all(algo, benchmark_name, task_list, task_demo_pat
                     visual_task_spec = torch.stack(image_list, dim=0).to(cfg.device)
                 else:
                     raise NotImplementedError
+                
                 visual_task_spec = visual_task_spec.to(cfg.device)
                 visual_task_spec_list = []
                 vid_task_spec_feat_list = []
@@ -172,6 +182,7 @@ def get_visual_specifications_all(algo, benchmark_name, task_list, task_demo_pat
                 vid_task_spec_final.append(vid_task_spec_feat)
                 img_task_spec_mask_final.append(torch.ones(img_task_spec_feat.shape[:-1]))
                 vid_task_spec_mask_final.append(torch.ones(vid_task_spec_feat.shape[:-1]))
+            
             return_dict[task_name] = { # Save using task_name to maintain consistency accrross systems
                     'vid_task_spec': vid_task_spec_final,
                     'vid_task_spec_mask': vid_task_spec_mask_final,

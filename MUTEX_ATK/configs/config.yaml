@@ -26,7 +26,7 @@ visual_embedding_format: "clip"
 lang_embedding_format: "clip"
 tokenizer: openai/clip-vit-large-patch14
 lang_tokenizer: openai/clip-vit-large-patch14
-n_ts_per_task: 11
+n_ts_per_task: 1
 recalculate_ts_embs: True # Set this to False to avoid recalculations
 task_embedding_one_hot_offset: 1
 pretrain: false

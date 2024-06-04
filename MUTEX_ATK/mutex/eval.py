@@ -7,7 +7,9 @@ import pandas as pd
 import pprint
 import time
 import torch
+import datetime
 import cv2
+import imageio
 from easydict import EasyDict
 from hydra.utils import to_absolute_path
 from omegaconf import OmegaConf
@@ -38,8 +40,12 @@ class EvalLogger:
         df = pd.DataFrame(self._dict)
         df.to_csv(filename, index=False)
 
+def make_dir(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
 def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
-    #initiate evaluation envs
+    # Initiate evaluation envs
     record_h, record_w = 512, 512
     env_args = {
         "bddl_file_name": os.path.join(cfg.bddl_folder, task_i.problem_folder, task_i.bddl_file),
@@ -61,16 +67,23 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
 
         make_dir(os.path.join(eval_cfg.experiment_dir, "videos"))
         video_path = os.path.join(eval_cfg.experiment_dir, "videos", f"summary_taskind{task_ind}_no{traj_key}.avi")
+        gif_path = os.path.join(eval_cfg.experiment_dir, "videos", f"summary_taskind{task_ind}_no{traj_key}.gif")
         print(f"---- Saving video: {len(imgs)}\n", video_path)
-        out = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'MJPG'), 30, (record_h, record_w))
-        # Write frames to the VideoWriter object
+        
+        # Save video
+        out = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'MJPG'), 30, (record_w, record_h))
         for frame in imgs:
             out.write(frame)
-        # Release the VideoWriter object
         out.release()
 
+        # Save GIF
+        with imageio.get_writer(gif_path, mode='I', fps=30) as writer:
+            for frame in imgs:
+                writer.append_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
     env.close()
-    import gc; gc.collect()
+    import gc
+    gc.collect()
     return
 
 def bm_set_task_embs(algo, benchmark, eval_spec_modalities, task_range, device):

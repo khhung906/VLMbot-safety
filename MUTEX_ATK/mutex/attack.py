@@ -7,7 +7,9 @@ import pandas as pd
 import pprint
 import time
 import torch
+import datetime
 import cv2
+import imageio
 from easydict import EasyDict
 from hydra.utils import to_absolute_path
 from omegaconf import OmegaConf
@@ -39,9 +41,23 @@ class EvalLogger:
         df = pd.DataFrame(self._dict)
         df.to_csv(filename, index=False)
 
-def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
-    #initiate evaluation envs
-    record_h, record_w = 512, 512
+def make_dir(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+def write_log(eval_cfg, base_task_name, target_task_name, success_rate, attack_method, loss_type, alpha='', epsilon='', steps=''):
+    log_path = os.path.join(eval_cfg.experiment_dir, "logs", f"experiment_logs.csv")
+    if not os.path.exists(log_path):
+        f = open(log_path, 'a+')
+        print("Time", "Base Task", "Target Task", "Success Rate", "Attack Method", "Loss Type", "Alpha", "Epsilon", "Steps", file=f, sep=",")
+        f.close()
+    f = open(log_path, 'a+')
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{base_task_name},{target_task_name},{success_rate},{attack_method},{loss_type},{alpha},{epsilon},{steps}", file=f)
+    f.close()
+
+def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg, success_rate, eval_logger):
+    # Initiate evaluation envs
+    record_h, record_w = 256, 256
     env_args = {
         "bddl_file_name": os.path.join(cfg.bddl_folder, task_i.problem_folder, task_i.bddl_file),
         "camera_heights": record_h,
@@ -50,7 +66,24 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
 
     env = OffScreenRenderEnv(**env_args)
     env.seed(cfg.seed)
-    sub_dir_name = datetime.datetime.now().strftime('%m-%d-%H-%M-%S') + f"_data_{cfg.benchmark_name.lower()}_attack_{cfg.attack_method}_base_{cfg.base_task_id}_target_{cfg.target_task_id}"
+    task_dir_name = f"base_{cfg.base_task_name}/target_{cfg.target_task_name}"
+    sub_dir_name = f"attack_{cfg.attack_method}_loss_{cfg.loss_type}" # _data_{cfg.benchmark_name}
+    if '2img' in cfg.attack_method: sub_dir_name += f"_alpha_{cfg.alpha}_eps_{cfg.epsilon}_iter_{cfg.perturb_steps}"
+    sub_dir_name += f"_n_{cfg.eval.n_eval}sc_{success_rate:.2f}"
+    
+    make_dir(os.path.join(eval_cfg.experiment_dir, "eval", task_dir_name, sub_dir_name))
+
+    csv_path = os.path.join(eval_cfg.experiment_dir, "eval", task_dir_name, sub_dir_name, f"summary_taskind{task_ind}.csv")
+    eval_logger.save(csv_path)
+
+    pimage_path = os.path.join(eval_cfg.experiment_dir, "eval", task_dir_name, sub_dir_name, f"perturbed_image.png")
+    if '2img' in cfg.attack_method:
+        cfg.perturbed_image.save(pimage_path)
+        write_log(eval_cfg, cfg.base_task_name, cfg.target_task_name, success_rate, cfg.attack_method, cfg.loss_type, alpha=cfg.alpha, epsilon=cfg.epsilon, steps=cfg.perturb_steps)
+    else:
+        write_log(eval_cfg, cfg.base_task_name, cfg.target_task_name, success_rate, cfg.attack_method, cfg.loss_type)
+
+
     for traj_key in result_summary[task_ind]["sim_states"].keys():
         print(f"Task index {task_ind}, eval_traj {traj_key}, length {len(result_summary[task_ind]['sim_states'][traj_key])}")
 
@@ -60,24 +93,32 @@ def summary2video(task_ind, task_i, result_summary, eval_cfg, cfg):
             obs = env.regenerate_obs_from_state(sim_state)
             img = obs["agentview_image"][::-1,:,:]
             imgs.append(img)
+        
+        # video_path = os.path.join(eval_cfg.experiment_dir, "eval", task_dir_name, sub_dir_name, f"summary_taskind{task_ind}_no{traj_key}.avi")
+        
+        gif_path = os.path.join(eval_cfg.experiment_dir, "eval", task_dir_name, sub_dir_name, f"summary_taskind{task_ind}_no{traj_key}.gif")
+        print(f"---- Saving video: {len(imgs)}\n", gif_path)
+        
+        # Save video
+        # out = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'MJPG'), 30, (record_w, record_h))
+        # for frame in imgs:
+        #     out.write(frame)
+        # out.release()
 
-        make_dir(os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name))
-        video_path = os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name, f"summary_taskind{task_ind}_no{traj_key}.avi")
-        print(f"---- Saving video: {len(imgs)}\n", video_path)
-        out = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'MJPG'), 30, (record_h, record_w))
-        # Write frames to the VideoWriter object
-        for frame in imgs:
-            out.write(frame)
-        # Release the VideoWriter object
-        out.release()
+        # Save GIF
+        with imageio.get_writer(gif_path, mode='I', duration=30) as writer:
+            for frame in imgs:
+                writer.append_data(frame) 
+
         if cfg.attack_method == 'gl2gl':
-            with open(os.path.join(eval_cfg.experiment_dir, "videos", sub_dir_name, "senetnces.txt"), 'w') as f:
+            with open(os.path.join(eval_cfg.experiment_dir, "eval", task_dir_name, sub_dir_name, "sentences.txt"), 'w') as f:
                 for s in cfg.selected_rephrases:
                     print(s, file=f)
                 f.close()
-
+                
     env.close()
-    import gc; gc.collect()
+    import gc
+    gc.collect()
     return
 
 def bm_set_task_embs(algo, benchmark, eval_spec_modalities, task_range, device):
@@ -143,7 +184,7 @@ def main(eval_cfg):
         cfg = json.load(f)
 
     ## preprocessing
-    cfg = EasyDict(cfg)
+    cfg = EasyDict(cfg)    
     # print configs to terminal
     pp = pprint.PrettyPrinter(indent=2)
     pp.pprint(cfg)
@@ -163,6 +204,10 @@ def main(eval_cfg):
     cfg.eval.n_eval = eval_cfg.n_eval
     cfg.experiment_dir = eval_cfg.experiment_dir
     cfg.eval.num_procs = eval_cfg.num_workers
+    cfg.perturb_steps = eval_cfg.perturb_steps
+    cfg.alpha = eval_cfg.alpha
+    cfg.epsilon = eval_cfg.epsilon
+    cfg.loss_type = eval_cfg.loss_type
     train_benchmark_name = cfg.benchmark_name
     cfg.benchmark_name = eval_cfg.benchmark_name if eval_cfg.benchmark_name is not None else cfg.benchmark_name
     cfg.pretrain_model_path = [os.path.join(cfg.experiment_dir, 'models', eval_cfg.model_name)]
@@ -187,14 +232,14 @@ def main(eval_cfg):
         assert all([task_spec in cfg.policy.task_spec_modalities.split('_') for task_spec in eval_cfg.eval_spec_modalities.split('_')])
         cfg.policy.task_spec_modalities = eval_cfg.eval_spec_modalities
 
-    prefix = cfg.policy.task_spec_modalities + '_'
-    if eval_cfg.task_id == -1:
-        cfg.eval_csv_filename = os.path.join(eval_cfg.experiment_dir, \
-                f"{cfg.benchmark_name}_{prefix}eval_data_ts_{eval_cfg.ts_mode}_{eval_cfg.model_name}.csv")
-    else:
-        make_dir(os.path.join(eval_cfg.experiment_dir, "logs"))
-        cfg.eval_csv_filename = os.path.join(eval_cfg.experiment_dir, \
-                f"logs/{cfg.benchmark_name}_{prefix}eval_data_ts_{eval_cfg.ts_mode}_{eval_cfg.model_name}_task_{eval_cfg.task_id:03d}.csv")
+    # prefix = cfg.policy.task_spec_modalities + '_'
+    # if eval_cfg.task_id == -1:
+    #     cfg.eval_csv_filename = os.path.join(eval_cfg.experiment_dir, \
+    #             f"{cfg.benchmark_name}_{prefix}eval_data_ts_{eval_cfg.ts_mode}_{eval_cfg.model_name}.csv")
+    # else:
+    #     make_dir(os.path.join(eval_cfg.experiment_dir, "logs"))
+    #     cfg.eval_csv_filename = os.path.join(eval_cfg.experiment_dir, \
+    #             f"logs/{cfg.benchmark_name}_{prefix}eval_data_ts_{eval_cfg.ts_mode}_{eval_cfg.model_name}_task_{eval_cfg.task_id:03d}.csv")
 
     benchmark_dict = bm.get_benchmark_dict()
     benchmark = benchmark_dict[cfg.benchmark_name.lower()]()
@@ -247,6 +292,7 @@ def main(eval_cfg):
 
         if i == cfg.target_task_id:
             cfg.target_lang_assets = { "des": task_description, "ins": instructions, "gl": goal_language }
+            cfg.target_task_name = task_name
         if i == cfg.base_task_id:
             cfg.base_lang_assets = { "des": task_description, "ins": instructions, "gl": goal_language }
             cfg.base_task_name = task_name
@@ -355,8 +401,9 @@ def main(eval_cfg):
                         task_i=task_i,
                         result_summary=result_summary,
                         eval_cfg=eval_cfg,
-                        cfg=cfg)
-        eval_logger.save(cfg.eval_csv_filename)
+                        cfg=cfg,
+                        success_rate=success_rate, 
+                        eval_logger=eval_logger)
 
     print("[info] finished evaluating\n")
     del algo

@@ -12,10 +12,15 @@ init_states_folder: "LIBERO/libero/libero/init_files/"
 eval_spec_modalities:
 task_id: 0  # if task_id is specified, it will only evaluate on that task
 
-n_eval: 5
+n_eval: 3
 num_workers: ${n_eval}
 
 # attack args
 base_task_id:
 target_task_id:
 attack_method:
+
+perturb_steps: 1024
+alpha: 0.1
+epsilon: 12 # 12
+loss_type: "l2"
